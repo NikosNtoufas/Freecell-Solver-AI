@@ -1,5 +1,6 @@
 
-/*input file format example(Õ=13):
+//you can read the rules of the game here->https://cardgames.io/freecell/#rules
+/*input file example(Œù=13):
 ----------------------
 C3 C9 D1 D6 D10 C1 D12
 C8 S2 C5 D4 H1 S12 C6
@@ -44,46 +45,43 @@ D7 H6 H9 S11 S10 H2
 //time variables
 clock_t t1;					// Start time of the search algorithm
 clock_t t2;					// End time of the search algorithm
-#define TIMEOUT		100000	// Program terminates after TIMOUT secs
+#define TIMEOUT		300	// Program terminates after TIMOUT secs
 
 
-int solution_length;	// The lenght of the solution table.
+int solutionLength=0;	// The lenght of the solution table.
 int *solution;			// Pointer to a dynamic table with the moves of the solution.
 int N;                  //Number of max ranking
-struct tree_node
+struct treeNode
 {
     struct stack Tableau[numberOfStacks];           // The eight piles that make up the main table.
-    struct card Freecells[numberOfFreecells];       // The four piles in the upper left corner. In each pile you can put one card.
-    //struct stack Foundations[numberOfFoundations];  // The four piles in the upper right corner.
+    struct card Freecells[numberOfFreecells];       // The four piles in the upper left corner. On each pile you can put one card.
     int FoundatationRates[numberOfFoundations];     // Each table store an integer with Foundation's last card's rate.Empty Foundations have -1.
-	float h;						                    // the value of the heuristic function for this node
-	float g;						                    // the depth of this node wrt the root of the search tree
-	float f;						                    // f=0 or f=h or f=h+g, depending on the search algorithm used.
-    struct stack cardsMoved;
-    int moveTo;                                     //0-7 for stacks,8 for freecell,9 for foundations
-	struct tree_node *parent;	                    // pointer to the parrent node (NULL for the root).
-    struct child *firstChild;
-    //struct child *LastChild;
+	float h;						                // the value of the heuristic function for this node
+	int g;						                // the depth of this node from the root of the search tree
+	float f;						                // f=0 or f=h or f=h+g, depending on the search algorithm used.
+    struct stack cardsMoved;                        //contains the cards moved in the current move
+    int moveTo;                                     //0-7 for stacks,8 for free cell,9 for foundations
+	struct treeNode *parent;	                    // pointer to the parent node (NULL for the root).
+    struct child *firstChild;                       //pointer to the first child of the node
 };
 
 struct child
 {
-    struct tree_node *node;
+    struct treeNode *node;
     struct child *next;
 };
 // A node of the frontier. Frontier is kept as a float-linked list,
 // for efficiency reasons for the breadth-first search algorithm.
-struct frontier_node
+struct frontierNode
 {
-	struct tree_node *n;				// pointer to a search-tree node
-	struct frontier_node *previous;		// pointer to the previous frontier node
-	struct frontier_node *next;			// pointer to the next frontier node
+	struct treeNode *n;				// pointer to a search-tree node
+	struct frontierNode *previous;		// pointer to the previous frontier node
+	struct frontierNode *next;			// pointer to the next frontier node
 };
 
-struct frontier_node *frontier_head=NULL;	// The one end of the frontier
-struct frontier_node *frontier_tail=NULL;	// The other end of the frontier
-struct frontier_node *treeNodesHead=NULL;	// The other end of the frontier
-struct frontier_node *treeNodesTail=NULL;	// The other end of the frontier
+struct frontierNode *frontierHead=NULL;	// The one end of the frontier
+struct frontierNode *frontierTale=NULL;	// The other end of the frontier
+struct frontierNode *treeNodesHead=NULL;	// The other end of the frontier
 
 
 // Function that displays a message in case of wrong input parameters.
@@ -92,13 +90,13 @@ void WrongInputMessage()
 	printf("frecell <method> <input-file> <output-file>\n\n");
 	printf("where: ");
 	printf("<method> = breadth|depth|best|astar \n");
-	printf("<input-file> is a file containing a freecell problem description with max value:%d.\n",N);
+	printf("<input-file> is a file containing a freecell problem description with max value:%d.\n",13);
 	printf("<output-file> is the file where the solution will be written.\n");
 }
 
 
 // Reading input algorithm.
-int get_method(char* s)
+int GetMethod(char* s)
 {
     stringToLower(s);
 	if (strcmp(s,"breadth")==0)
@@ -122,9 +120,7 @@ int ReadInputFromFile(char* filename, struct stack *allStacks,int size)
 	fin=fopen(filename, "r");
 	if (fin==NULL)
 	{
-		#ifdef SHOW_COMMENTS
-			printf("Cannot open file %s. Program terminates.\n",filename);
-		#endif
+        printf("Cannot open file %s. Program terminates.\n",filename);
 		return -1;
 	}
 
@@ -176,7 +172,7 @@ int ReadInputFromFile(char* filename, struct stack *allStacks,int size)
             push(&allStacks[stackCounter],tempCard);
             stackCounter++;
         }
-        else if(c==' ')
+        else if(c == ' ')
         {
             push(&allStacks[stackCounter],tempCard);
         }
@@ -223,24 +219,27 @@ int verifyInput(struct stack *allStacks)
     }
 }
 
-
-void moveToFoundation(struct tree_node *node,struct card tempCard)
+//save the current move
+//in this round a card has moved to a Foundation
+void SaveMoveFoundation(struct treeNode *node,struct card tempCard)
 {
     node->cardsMoved.size = 0;
     push(&node->cardsMoved,tempCard);
     node->moveTo = 9; //move to Foundation
 }
 
-
-void moveToFreecell(struct tree_node *node,struct card tempCard)
+//save the current move
+//in this round a card has moved to a free cell
+void SaveMoveFreecell(struct treeNode *node,struct card tempCard)
 {
     node->cardsMoved.size = 0;
     push(&node->cardsMoved,tempCard);
     node->moveTo = 8;
 }
 
-
-void moveToAnotherStack(struct tree_node *node,int index,struct stack tempStack)
+//save the current move
+//in this round one or more cards have moved to another stack
+void SaveMoveAnotherStack(struct treeNode *node,int index,struct stack tempStack)
 {
     node->cardsMoved.size = 0;
     while(tempStack.size>0)
@@ -251,70 +250,68 @@ void moveToAnotherStack(struct tree_node *node,int index,struct stack tempStack)
 }
 
 // This function checks whether a node in the search tree
-// holds exactly the same puzzle with at least one of its
-// predecessors. This function is used when creating the childs
-// of an existing search tree node, in order to check for each one of the childs
-// whether this appears in the path from the root to its parent.
 // This is a moderate way to detect loops in the search.
 // Inputs:
-//		struct tree_node *new_node	: A search tree node (usually a new one)
+//		struct treeNode *newNode	: A search tree node (usually a new one)
 // Output:
 //		1 --> No coincidence with any predecessor
 //		0 --> Loop detection
-int checkWithParents(struct tree_node *new_node)
+int checkWithParents(struct treeNode *newNode)
 {
     //check all nodes
     int k;
-	k = checkAllNodes(new_node);
+	k = checkAllNodes(newNode);
 
 	return k;
 
-	struct tree_node *parent=new_node->parent;
+	//instead of checking all nodes of the tree
+	//you can check only the parents
+	//or all its parents with their children
+
+	/*struct treeNode *parent=newNode->parent;
 
 	while (parent!=NULL)
 	{
 
-	    if (AllStacksEquals(new_node,parent))
+	    if (AllStacksEquals(newNode,parent))
 			return 0;
-        /*struct child *tempChild;
+        struct child *tempChild;
         int c = 1;
         tempChild = parent->firstChild;
         while(tempChild!=NULL)
         {
-            if(AllStacksEquals(new_node,tempChild->node))
+            if(AllStacksEquals(newNode,tempChild->node))
                 return 0;
             tempChild=tempChild->next;
-        }*/
+        }
 		parent=parent->parent;
 	}
 
 
-	return 1;
+	return 1;*/
 
 }
 
-
-int checkAllNodes(struct tree_node *new_node)
+//check all nodes to detect loops
+int checkAllNodes(struct treeNode *newNode)
 {
-    struct frontier_node *tempChild;
+    struct frontierNode *tempChild;
     tempChild = treeNodesHead;
-   // printf("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&\n");
-   // printf("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&\n");
     while(tempChild!=NULL)
     {
 
         //displayGameTable(tempChild->n);
-        if(AllStacksEquals(new_node,tempChild->n))
+        if(AllStacksEquals(newNode,tempChild->n))
             return 0;
         tempChild=tempChild->next;
     }
     return 1;
 }
 
-// This function checks whether two Tableau stacks are equals
+// This function checks whether two nodes are equals
 //		1 --> The stacks are equal
 //		0 --> The stacks are not equal
-int AllStacksEquals(struct tree_node *new_node,struct tree_node *parent)
+int AllStacksEquals(struct treeNode *new_node,struct treeNode *parent)
 {
     int flag = 0;
     int numberOfEmptyStacksNew=0;
@@ -337,128 +334,97 @@ int AllStacksEquals(struct tree_node *new_node,struct tree_node *parent)
             numberOfEmptyStacksParent++;
     }
 
-    if(1)//numberOfEmptyStacksNew>0&&numberOfEmptyStacksParent>0)
+
+
+    if(numberOfEmptyStacksNew!=numberOfEmptyStacksParent)
+        return 0; //two nodes are not equals, they haven't the same number of empty stacks
+
+
+    //Match every parent stacks.
+    //If all parent Tableau stacks have one equal new node stack, the two nodes are equals
+    //0 available / 1 not available
+    int availableParentStacks[numberOfStacks];
+    //-initialize
+    for(int k=0; k<numberOfStacks;k++)
     {
+        availableParentStacks[k] = 0;
+    }
 
-        if(numberOfEmptyStacksNew!=numberOfEmptyStacksParent)
-            return 0; //two nodes are not equals
 
 
-        //Match every parent stacks.
-        //If all parent Tableau stacks have one equal new node stack, the two nodes are equals
-        //0 available / 1 not available
-        int availableParentStacks[numberOfStacks];
-
-        for(int k=0; k<numberOfStacks;k++) //-initialize
+    for(int nIndex=0; nIndex<numberOfStacks; nIndex++)
+    {
+        for(int pIndex=0; pIndex<numberOfStacks; pIndex++)
         {
-            availableParentStacks[k] = 0;
-        }
+            if(availableParentStacks[pIndex] == 1) //parent stack already matched
+                continue;
 
-
-
-        for(int nIndex=0; nIndex<numberOfStacks; nIndex++)
-        {
-            for(int pIndex=0; pIndex<numberOfStacks; pIndex++)
+            //Two stacks can be equals only if they have the same size
+            if(availableParentStacks[pIndex]==0 && new_node->Tableau[nIndex].size==parent->Tableau[pIndex].size)
             {
-                if(availableParentStacks[pIndex] == 1) //parent stack already matched
-                    continue;
-
-                //Two stacks can be equals only if they have the same size
-                if(availableParentStacks[pIndex]==0 && new_node->Tableau[nIndex].size==parent->Tableau[pIndex].size)
+                //two eguals empty stack
+                if(new_node->Tableau[nIndex].size==0)
                 {
-                    //two eguals empty stack
-                    if(new_node->Tableau[nIndex].size==0)
+                    availableParentStacks[pIndex] = 1;
+                    break;
+                }
+                else
+                {
+                    int equals = 1;
+                    //check all the cards
+                    for(int j=0; j<new_node->Tableau[nIndex].size; j++)
                     {
-                        availableParentStacks[pIndex] = 1;
-                        break;
-                    }
-                    else
-                    {
-                        int equals = 1;
-                        //check all the cards
-                        for(int j=0; j<new_node->Tableau[nIndex].size; j++)
-                        {
-                            struct card c1 = new_node->Tableau[nIndex].cards[j];
-                            struct card c2 = parent->Tableau[pIndex].cards[j];
+                        struct card c1 = new_node->Tableau[nIndex].cards[j];
+                        struct card c2 = parent->Tableau[pIndex].cards[j];
 
-                            if(c1.icon!=c2.icon || c1.rate!=c2.rate)
-                            {
-                                equals = 0;
-                                break;
-                            }
-                        }
-                        if(equals)
+                        if(c1.icon!=c2.icon || c1.rate!=c2.rate)
                         {
-                            availableParentStacks[pIndex]=1; // nIndex and pIndex stacks are equals
+                            equals = 0;
                             break;
                         }
-
                     }
+                    if(equals)
+                    {
+                        availableParentStacks[pIndex]=1; // nIndex and pIndex stacks are equals
+                        break;
+                    }
+
                 }
             }
         }
-
-        for(int i=0;i<numberOfStacks;i++)
-        {
-            if(availableParentStacks[i]==0)
-                return 0; //not equals
-        }
-        return 1;
     }
 
-
-    //check the sizes of the stacks. If the same stack of Tableau has different size return 0.
-    for(int i=0; i<numberOfStacks; i++)
+    for(int i=0;i<numberOfStacks;i++)
     {
-        if(new_node->Tableau[i].size!=parent->Tableau[i].size)
-        {
-            return 0;
-        }
+        if(availableParentStacks[i]==0)
+            return 0; //not equals
     }
+    return 1;
 
-    //check the cards of the stacks
-    for(int i=0;i<numberOfStacks; i++)
-    {
-        for(int j=0; j<new_node->Tableau[i].size; j++)
-        {
-            struct card c1 = new_node->Tableau[i].cards[j];
-            struct card c2 = parent->Tableau[i].cards[j];
-
-            if(c1.icon!=c2.icon || c1.rate!=c2.rate)
-                return 0;
-        }
-    }
-
-    for(int i=0; i<numberOfFoundations;i++)
-    {
-        if(new_node->FoundatationRates[i]!=parent->FoundatationRates[i])
-            return 0;
-    }
-
-	return 1;
 }
 
-
-int getNumWellPlaced(struct tree_node *current_node)
+//return the number of the cards that have the correct position in the stack
+//NOT USED
+int getNumWellPlaced(struct treeNode *currNode)
 {
     int j,i;
     int count =0;
     for(i=0; i<numberOfStacks; i++)
     {
-        int size = current_node->Tableau[i].size;
+        int size = currNode->Tableau[i].size;
 
         int temp[size];
-        for(int j=0; j<current_node->Tableau[i].size; j++)
+        for(int j=0; j<currNode->Tableau[i].size; j++)
         {
-            temp[j]= current_node->Tableau[i].cards[j].rate;
+            temp[j]= currNode->Tableau[i].cards[j].rate;
         }
 
         //sort stack
         countSort(temp,size,N);
 
-        for( j=0; j<current_node->Tableau[i].size; j++)
+        for( j=0; j<currNode->Tableau[i].size; j++)
         {
-            if(temp[j]==current_node->Tableau[i].cards[j].rate)
+            if(temp[j]==currNode->Tableau[i].cards[j].rate)
                 count++;
         }
     }
@@ -469,7 +435,7 @@ int getNumWellPlaced(struct tree_node *current_node)
 
 
 
-
+//count sort
 void countSort(int arr[], int n, int k)
 {
 	// create an integer array of size n to store sorted array
@@ -505,9 +471,10 @@ void countSort(int arr[], int n, int k)
 		arr[i] = output[i];
 }
 
-//returns 1 if all the cards are in
+//returns 1 if all the cards are in the Foundations
 //higher values means better positions for cards
-float getMinCardPos(struct tree_node *current_node)
+//returns the distance from the top of the stack of the next cards that can be moved to foundation
+float GetTargetCardsDistance(struct treeNode *currNode)
 {
 
     int j,i;
@@ -516,7 +483,7 @@ float getMinCardPos(struct tree_node *current_node)
     int k = N;
     for(int f=0; f<numberOfFoundations;f++)
     {
-        min[f]=current_node->FoundatationRates[f]+1;
+        min[f]=currNode->FoundatationRates[f]+1;
         if(min[f]==N)
             distance[f] = 0.25;
         else
@@ -526,65 +493,62 @@ float getMinCardPos(struct tree_node *current_node)
 
     for(i=0; i<numberOfStacks; i++)
     {
-        int size = current_node->Tableau[i].size;
+        int size = currNode->Tableau[i].size;
 
-        for(j=0; j<current_node->Tableau[i].size; j++)
+        for(j=0; j<currNode->Tableau[i].size; j++)
         {
-            if(min[current_node->Tableau[i].cards[j].icon]== current_node->Tableau[i].cards[j].rate)
+            if(min[currNode->Tableau[i].cards[j].icon]== currNode->Tableau[i].cards[j].rate)
             {
                 float temp = ((float)size-(float)j)/100.0;
-                distance[current_node->Tableau[i].cards[j].icon] = 0.25 - temp;
+                distance[currNode->Tableau[i].cards[j].icon] = 0.25 - temp;
             }
 
         }
     }
 
-    float count;
+    float count=0.0;
     for(i=0;i<numberOfFoundations;i++)
     {
         count = count + distance[i];
-    }
-    if(count>1)
-    {
-        printf("fefe");
     }
 
     return count;
 
 }
 
-float heuristic(struct tree_node *current_node)
+float heuristic(struct treeNode *currNode)
 {
-    float count=0;
+    float weight= 1.0;
+    //weight = 2.0;
+    //heuristic weight , in case of a* algorithm If you increase the weight
+    // you reduce the time and possibly you will find a better solution than the best algorithm
+    //a* is optimum with weight = 1 only
+    float countFoundationCards=0;
     for(int i=0; i<numberOfFoundations;i++)
     {
-        count+=current_node->FoundatationRates[i]+1;
+        countFoundationCards+=currNode->FoundatationRates[i]+1;
     }
 
-    //int numWellPlaced = getNumWellPlaced(current_node);
-
-    //return count*100+numWellPlaced;
-    //return count*100-getMinCardPos(current_node);
-    float z = getMinCardPos(current_node);
-    float bales = (N*4+1)-count;
-    return (bales-z);
+    float cardsLeft = (N*4+1)-countFoundationCards;
+    float distance = GetTargetCardsDistance(currNode);
+    return (cardsLeft-distance)*weight;
 }
 
 
 // This function initializes the search, i.e. it creates the root node of the search tree
 // and the first node of the frontier.
-void initialize_search(struct stack t[8], int method)
+void InitializeSearch(struct stack t[numberOfStacks], int method)
 {
-	struct tree_node *root=NULL;	// the root of the search tree.
+	struct treeNode *root=NULL;	// the root of the search tree.
 	int stackSize=0;
 	int i,j;
 
 	// Initialize search tree
-	root=(struct tree_node*) malloc(sizeof(struct tree_node));
+	root=(struct treeNode*) malloc(sizeof(struct treeNode));
 	root->parent=NULL;
 	root->firstChild = NULL;
 
-	//initialize freecells / icon =-1 , rate = -1 ---> empty card
+	//initialize free cells / icon =-1 , rate = -1 ---> empty card
 	for(i=0;i<numberOfFreecells;i++)
     {
         root->Freecells[i].icon = -1;
@@ -597,8 +561,8 @@ void initialize_search(struct stack t[8], int method)
         root->FoundatationRates[i] = -1; // empty Foundation
     }
 
-	//copy Tableau stacks to tree_node
-	for(i=0;i<8;i++)
+	//copy Tableau stacks to treeNode
+	for(i=0;i<numberOfStacks;i++)
 	{
          stackSize = t[i].size;
             for(j=0;j<stackSize;j++)
@@ -608,21 +572,23 @@ void initialize_search(struct stack t[8], int method)
 
 
 
-	root->g=0.0;
+	root->g=0;
 	root->h=heuristic(root);
 	if (method==best)
 		root->f=root->h;
 	else if (method==astar)
-		root->f=root->g+root->h;
+		root->f=(float)root->g+root->h;
 	else
 		root->f=0.0;
 
 	// Initialize frontier
-	add_frontier_front(root);
+	AddFrontierFront(root);
 	addToAllNodes(root);
 }
-//add child to node
-int addChild(struct tree_node *node,struct tree_node *newNode)
+
+//add child to parent node
+//NOT USED!!!! Checking for loops in all nodes so this functionality is not used
+int addChild(struct treeNode *parentNode,struct treeNode *newNode)
 {
 
 	// Creating the new child node
@@ -634,17 +600,11 @@ int addChild(struct tree_node *node,struct tree_node *newNode)
 	newChild->node=newNode;
 	newChild->next=NULL;
 
-	if (node->firstChild==NULL)
+	if (parentNode->firstChild==NULL)
 	{
-		node->firstChild =newChild;
+		parentNode->firstChild =newChild;
 
 	}
-	//else if(node->LastChild==NULL)
-	//{
-	//    newChild->previous=node->firstChild;
-	//	node->firstChild->next = newChild;
-	//	node->LastChild = newChild;
-	//}
 	else
     {
         int flag = 1;
@@ -653,7 +613,7 @@ int addChild(struct tree_node *node,struct tree_node *newNode)
         if (pt==NULL)
             return -1;
 
-        pt = node->firstChild;
+        pt = parentNode->firstChild;
         while(flag)
         {
 
@@ -670,113 +630,98 @@ int addChild(struct tree_node *node,struct tree_node *newNode)
     }
 
 
-
-#ifdef SHOW_COMMENTS
-	printf("Added to the front...\n");
-	displayGameTable(node->p);
-#endif
 	return 0;
 }
 
-
-int addToAllNodes(struct tree_node *node)
+//Saving new Node to all nodes structure
+//Use this functionality to check for loops in the next nodes
+int addToAllNodes(struct treeNode *node)
 {
 	// Creating the new frontier node
-	struct frontier_node *new_frontier_node=(struct frontier_node*)
-                                malloc(sizeof(struct frontier_node));
-	if (new_frontier_node==NULL)
+	struct frontierNode *new_frontierNode=(struct frontierNode*)
+                                malloc(sizeof(struct frontierNode));
+	if (new_frontierNode==NULL)
 		return -1;
 
-	new_frontier_node->n=node;
-	new_frontier_node->previous=NULL;
-	new_frontier_node->next=treeNodesHead;
+	new_frontierNode->n=node;
+	new_frontierNode->previous=NULL;
+	new_frontierNode->next=treeNodesHead;
 
 	if (treeNodesHead==NULL)
 	{
-		treeNodesHead=new_frontier_node;
+		treeNodesHead=new_frontierNode;
 	}
 	else
 	{
-		treeNodesHead->previous=new_frontier_node;
-		treeNodesHead=new_frontier_node;
+		treeNodesHead->previous=new_frontierNode;
+		treeNodesHead=new_frontierNode;
 	}
-#ifdef SHOW_COMMENTS
-	printf("Added to the front...\n");
-	display_puzzle(node->p);
-#endif
+
 	return 0;
 }
 
 // This function adds a pointer to a new leaf search-tree node at the front of the frontier.
 // This function is called by the depth-first search algorithm.
 // Inputs:
-//		struct tree_node *node	: A (leaf) search-tree node.
+//		struct treeNode *node	: A (leaf) search-tree node.
 // Output:
 //		0 --> The new frontier node has been added successfully.
 //		-1 --> Memory problem when inserting the new frontier node .
-int add_frontier_front(struct tree_node *node)
+int AddFrontierFront(struct treeNode *node)
 {
 	// Creating the new frontier node
-	struct frontier_node *new_frontier_node=(struct frontier_node*)
-                                malloc(sizeof(struct frontier_node));
-	if (new_frontier_node==NULL)
+	struct frontierNode *new_frontierNode=(struct frontierNode*)
+                                malloc(sizeof(struct frontierNode));
+	if (new_frontierNode==NULL)
 		return -1;
 
-	new_frontier_node->n=node;
-	new_frontier_node->previous=NULL;
-	new_frontier_node->next=frontier_head;
+	new_frontierNode->n=node;
+	new_frontierNode->previous=NULL;
+	new_frontierNode->next=frontierHead;
 
-	if (frontier_head==NULL)
+	if (frontierHead==NULL)
 	{
-		frontier_head=new_frontier_node;
-		frontier_tail=new_frontier_node;
+		frontierHead=new_frontierNode;
+		frontierTale=new_frontierNode;
 	}
 	else
 	{
-		frontier_head->previous=new_frontier_node;
-		frontier_head=new_frontier_node;
+		frontierHead->previous=new_frontierNode;
+		frontierHead=new_frontierNode;
 	}
 
-#ifdef SHOW_COMMENTS
-	printf("Added to the front...\n");
-	display_puzzle(node->p);
-#endif
 	return 0;
 }
 
 // This function adds a pointer to a new leaf search-tree node at the back of the frontier.
 // This function is called by the breadth-first search algorithm.
 // Inputs:
-//		struct tree_node *node	: A (leaf) search-tree node.
+//		struct treeNode *node	: A (leaf) search-tree node.
 // Output:
 //		0 --> The new frontier node has been added successfully.
 //		-1 --> Memory problem when inserting the new frontier node .
-int add_frontier_back(struct tree_node *node)
+int AddFrontierBack(struct treeNode *node)
 {
 	// Creating the new frontier node
-	struct frontier_node *new_frontier_node=(struct frontier_node*) malloc(sizeof(struct frontier_node));
-	if (new_frontier_node==NULL)
+	struct frontierNode *new_frontierNode=(struct frontierNode*) malloc(sizeof(struct frontierNode));
+	if (new_frontierNode==NULL)
 		return -1;
 
-	new_frontier_node->n=node;
-	new_frontier_node->next=NULL;
-	new_frontier_node->previous=frontier_tail;
+	new_frontierNode->n=node;
+	new_frontierNode->next=NULL;
+	new_frontierNode->previous=frontierTale;
 
-	if (frontier_tail==NULL)
+	if (frontierTale==NULL)
 	{
-		frontier_head=new_frontier_node;
-		frontier_tail=new_frontier_node;
+		frontierHead=new_frontierNode;
+		frontierTale=new_frontierNode;
 	}
 	else
 	{
-		frontier_tail->next=new_frontier_node;
-		frontier_tail=new_frontier_node;
+		frontierTale->next=new_frontierNode;
+		frontierTale=new_frontierNode;
 	}
 
-#ifdef SHOW_COMMENTS
-	printf("Added to the back...\n");
-	displayGameTable(node->p);
-#endif
 
 	return 0;
 }
@@ -786,31 +731,31 @@ int add_frontier_back(struct tree_node *node)
 // search-tree nodes. The new frontier node is inserted in order.
 // This function is called by the heuristic search algorithm.
 // Inputs:
-//		struct tree_node *node	: A (leaf) search-tree node.
+//		struct treeNode *node	: A (leaf) search-tree node.
 // Output:
 //		0 --> The new frontier node has been added successfully.
 //		-1 --> Memory problem when inserting the new frontier node .
-int add_frontier_in_order(struct tree_node *node)
+int AddFrontierInOrder(struct treeNode *node)
 {
 	// Creating the new frontier node
-	struct frontier_node *new_frontier_node=(struct frontier_node*)
-                malloc(sizeof(struct frontier_node));
-	if (new_frontier_node==NULL)
+	struct frontierNode *new_frontierNode=(struct frontierNode*)
+                malloc(sizeof(struct frontierNode));
+	if (new_frontierNode==NULL)
 		return -1;
 
-	new_frontier_node->n=node;
-	new_frontier_node->previous=NULL;
-	new_frontier_node->next=NULL;
+	new_frontierNode->n=node;
+	new_frontierNode->previous=NULL;
+	new_frontierNode->next=NULL;
 
-	if (frontier_head==NULL)
+	if (frontierHead==NULL)
 	{
-		frontier_head=new_frontier_node;
-		frontier_tail=new_frontier_node;
+		frontierHead=new_frontierNode;
+		frontierTale=new_frontierNode;
 	}
 	else
 	{
-		struct frontier_node *pt;
-		pt=frontier_head;
+		struct frontierNode *pt;
+		pt=frontierHead;
 
 		// Search in the frontier for the first node that corresponds to either a larger f value
 		// or to an equal f value but larger h value
@@ -827,28 +772,28 @@ int add_frontier_in_order(struct tree_node *node)
 
 		if (pt!=NULL)
 		{
-			// new_frontier_node is inserted before pt .
+			// new_frontierNode is inserted before pt .
 			if (pt->previous!=NULL)
 			{
-				pt->previous->next=new_frontier_node;
-				new_frontier_node->next=pt;
-				new_frontier_node->previous=pt->previous;
-				pt->previous=new_frontier_node;
+				pt->previous->next=new_frontierNode;
+				new_frontierNode->next=pt;
+				new_frontierNode->previous=pt->previous;
+				pt->previous=new_frontierNode;
 			}
 			else
 			{
-				// In this case, new_frontier_node becomes the first node of the frontier.
-				new_frontier_node->next=pt;
-				pt->previous=new_frontier_node;
-				frontier_head=new_frontier_node;
+				// In this case, new_frontierNode becomes the first node of the frontier.
+				new_frontierNode->next=pt;
+				pt->previous=new_frontierNode;
+				frontierHead=new_frontierNode;
 			}
 		}
 		else
 		{
-			// if pt==NULL, new_frontier_node is inserted at the back of the frontier
-			frontier_tail->next=new_frontier_node;
-			new_frontier_node->previous=frontier_tail;
-			frontier_tail=new_frontier_node;
+			// if pt==NULL, new_frontierNode is inserted at the back of the frontier
+			frontierTale->next=new_frontierNode;
+			new_frontierNode->previous=frontierTale;
+			frontierTale=new_frontierNode;
 		}
 	}
 
@@ -863,20 +808,20 @@ int add_frontier_in_order(struct tree_node *node)
 // The various search algorithms differ only in the way the insert
 // new nodes into the frontier, so most of the code is commmon for all algorithms.
 // Inputs:
-//		Nothing, except for the global variables root, frontier_head and frontier_tail.
+//		Nothing, except for the global variables root, frontierHead and frontierTale.
 // Output:
 //		NULL --> The problem cannot be solved
-//		struct tree_node*	: A pointer to a search-tree leaf node that corresponds to a solution.
+//		struct treeNode*	: A pointer to a search-tree leaf node that corresponds to a solution.
 
 
-struct tree_node *search(int method)
+struct treeNode *search(int method)
 {
     clock_t t;
 	int err;
-	struct frontier_node *temp_frontier_node;
-	struct tree_node *current_node;
+	struct frontierNode *temp_frontierNode;
+	struct treeNode *current_node;
 
-	while (frontier_head!=NULL)
+	while (frontierHead!=NULL)
 	{
 		t=clock();
 		if (t-t1>CLOCKS_PER_SEC*TIMEOUT)
@@ -886,32 +831,27 @@ struct tree_node *search(int method)
 		}
 
 		// Extract the first node from the frontier
-		current_node=frontier_head->n;
-#ifdef SHOW_COMMENTS
-		//printf("Extracted from frontier...\n");
-		//displayGameTable(current_node->p);
-#endif
-        displayGameTable(current_node);
-        //printf("\nh=%f    g=%d",current_node->f,(int)current_node->g);
+		current_node=frontierHead->n;
+
+        //displayGameTable(current_node);
+
 		if (gameWon(current_node))
         {
-            displayGameTable(current_node);
             return current_node;
         }
 
 
 		// Delete the first node of the frontier
-		temp_frontier_node=frontier_head;
-		frontier_head=frontier_head->next;
-		free(temp_frontier_node);
-		if (frontier_head==NULL)
-			frontier_tail=NULL;
+		temp_frontierNode=frontierHead;
+		frontierHead=frontierHead->next;
+		free(temp_frontierNode);
+		if (frontierHead==NULL)
+			frontierTale=NULL;
 		else
-			frontier_head->previous=NULL;
+			frontierHead->previous=NULL;
 
-		// Find the children of the extracted node
-		if(current_node->g<=N*10) //limit depth
-            err=find_children(current_node, method);
+		if(current_node->g<=N*100 || method!= depth) //limit depth for depth algorithm
+            err=FindChildren(current_node, method);
 
 
 		if (err<0)
@@ -927,15 +867,14 @@ struct tree_node *search(int method)
 
 
 // This function expands a leaf-node of the search tree.
-// A leaf-node may have up to 4 childs. A table with 4 pointers
-// to these childs is created, with NULLs for those childrens that do not exist.
+// A leaf-node may have childs for stack moves or from free cell moves
 // In case no child exists (due to loop-detections), the table is not created
 // and a 'higher-level' NULL indicates this situation.
 // Inputs:
-//		struct tree_node *current_node	: A leaf-node of the search tree.
+//		struct treeNode *current_node	: A leaf-node of the search tree.
 // Output:
 //		The same leaf-node expanded with pointers to its children (if any).
-int find_children(struct tree_node *current_node, int method)
+int FindChildren(struct treeNode *current_node, int method)
 {
 
 	// For each stack find the children
@@ -956,7 +895,7 @@ int find_children(struct tree_node *current_node, int method)
         }
     }
 
-    //for each freecell find the children
+    //for each free cell find the children
     for(int i=0;i<numberOfFreecells;i++)
     {
 
@@ -977,14 +916,19 @@ int find_children(struct tree_node *current_node, int method)
 	return 1;
 }
 
-int addNewNode(struct tree_node *child,int method)
+//new node added
+int addNewNode(struct treeNode *child,int method)
 {
-    // Computing the heuristic value
-			child->h=heuristic(child);
+    // Computing the heuristic value if needed only
+            if(method== best || method == astar)
+                child->h=heuristic(child);
+            else
+                child->h=0.0;
+
 			if (method==best)
 				child->f=child->h;
 			else if (method==astar)
-				child->f=child->g+child->h;
+				child->f=(float)child->g+child->h;
 			else
 				child->f=0.0;
             child->firstChild =NULL;
@@ -992,22 +936,25 @@ int addNewNode(struct tree_node *child,int method)
              int errorChilds = addToAllNodes(child);
             if(errorChilds<0)
                 return -1;
+
+            //add child to parent node childs ,NOT USED!
            /* int errorChilds = addChild(current_node,child);
             if(errorChilds<0)
                 return -1;*/
 
             int err=0;
             if (method==depth)
-				err=add_frontier_front(child);
+				err=AddFrontierFront(child);
 			else if (method==breadth)
-				err=add_frontier_back(child);
+				err=AddFrontierBack(child);
 			else if (method==best || method==astar)
-				err=add_frontier_in_order(child);
+				err=AddFrontierInOrder(child);
 			if (err<0)
                 return -1;
 }
 
-int findChilderForAStack(struct tree_node *current_node,int index,int method,int comboNum)
+//Find the children for the cards of the stacks
+int findChilderForAStack(struct treeNode *current_node,int index,int method,int comboNum)
 {
     struct card c = getLastCard(&current_node->Tableau[index]);
     int addToFoundation = allowAddCardToFoundation(c,current_node->FoundatationRates);
@@ -1016,7 +963,7 @@ int findChilderForAStack(struct tree_node *current_node,int index,int method,int
     if(addToFoundation)
     {
 		// Initializing the new child
-		struct tree_node *child=(struct tree_node*) malloc(sizeof(struct tree_node));
+		struct treeNode *child=(struct treeNode*) malloc(sizeof(struct treeNode));
 
 		if (child==NULL) return -1;
 
@@ -1040,14 +987,14 @@ int findChilderForAStack(struct tree_node *current_node,int index,int method,int
 
         }
 		child->parent=current_node;
-		child->g=current_node->g+1.0;	 	// The depth of the new child
+		child->g=current_node->g+1;	 	// The depth of the new child
 		// remove card from the stack
 		struct card tempCard = pop(&child->Tableau[index]);
 		// add card to Foundation
 		child->FoundatationRates[tempCard.icon]= tempCard.rate;
 
 		//save the moved cards
-        moveToFoundation(child,tempCard);
+        SaveMoveFoundation(child,tempCard);
 
 		// Check for loops
 		if (!checkWithParents(child))
@@ -1059,35 +1006,6 @@ int findChilderForAStack(struct tree_node *current_node,int index,int method,int
 		    error = addNewNode(child,method);
 		    if(error<0)
                 return -1;
-
-			/*
-			// Computing the heuristic value
-			child->h=heuristic(child);
-			if (method==best)
-				child->f=child->h;
-			else if (method==astar)
-				child->f=child->g+child->h;
-			else
-				child->f=0.0;
-            child->firstChild =NULL;
-
-             int errorChilds = addToAllNodes(child);
-            if(errorChilds<0)
-                return -1;
-           /* int errorChilds = addChild(current_node,child);
-            if(errorChilds<0)
-                return -1;
-
-            int err=0;
-            if (method==depth)
-				err=add_frontier_front(child);
-			else if (method==breadth)
-				err=add_frontier_back(child);
-			else if (method==best || method==astar)
-				err=add_frontier_in_order(child);
-			if (err<0)
-                return -1;
-                */
 		}
 
     }
@@ -1117,7 +1035,7 @@ int findChilderForAStack(struct tree_node *current_node,int index,int method,int
             if(addToStack)
             {
                 // Initializing the new child
-                struct tree_node *child=(struct tree_node*) malloc(sizeof(struct tree_node));
+                struct treeNode *child=(struct treeNode*) malloc(sizeof(struct treeNode));
 
                 if (child==NULL) return -1;
 
@@ -1141,7 +1059,7 @@ int findChilderForAStack(struct tree_node *current_node,int index,int method,int
 
 
                 child->parent=current_node;
-                child->g=current_node->g+1.0;	 	// The depth of the new child
+                child->g=current_node->g+1;	 	// The depth of the new child
 
 
                 struct stack tempStack;
@@ -1155,16 +1073,12 @@ int findChilderForAStack(struct tree_node *current_node,int index,int method,int
                 }
 
                 //save move
-                moveToAnotherStack(child,i,tempStack);
+                SaveMoveAnotherStack(child,i,tempStack);
 
                 while(tempStack.size>0)
                 {
                     push(&child->Tableau[i],pop(&tempStack));
                 }
-
-
-                // add card to Foundation
-
 
                 // Check for loops
                 if (!checkWithParents(child))
@@ -1177,35 +1091,6 @@ int findChilderForAStack(struct tree_node *current_node,int index,int method,int
                     if(error<0)
                         return -1;
 
-                    /*
-                    // Computing the heuristic value
-                    child->h=heuristic(child);
-                    if (method==best)
-                        child->f=child->h;
-                    else if (method==astar)
-                        child->f=child->g+child->h;
-                    else
-                        child->f=0;
-                    child->firstChild =NULL;
-                    int errorChilds = addToAllNodes(current_node);
-                    if(errorChilds<0)
-                        return -1;
-                    /* int errorChilds = addChild(current_node,child);
-                            if(errorChilds<0)
-                                return -1;
-
-                    int err=0;
-                    if (method==depth)
-                        err=add_frontier_front(child);
-                    else if (method==breadth)
-                        err=add_frontier_back(child);
-                    else if (method==best || method==astar)
-                        err=add_frontier_in_order(child);
-                    if (err<0)
-                        return -1;
-
-
-                     */
                 }
 
             }
@@ -1219,7 +1104,7 @@ int findChilderForAStack(struct tree_node *current_node,int index,int method,int
             if(freecell>-1)
             {
                 // Initializing the new child
-                struct tree_node *child=(struct tree_node*) malloc(sizeof(struct tree_node));
+                struct treeNode *child=(struct treeNode*) malloc(sizeof(struct treeNode));
 
                 if (child==NULL) return -1;
 
@@ -1253,7 +1138,7 @@ int findChilderForAStack(struct tree_node *current_node,int index,int method,int
                 child->Freecells[freecell] = tempCard;
 
                 //save move
-                moveToFreecell(child,tempCard);
+                SaveMoveFreecell(child,tempCard);
 
                 //Check for loops
                 if (!checkWithParents(child))
@@ -1265,32 +1150,7 @@ int findChilderForAStack(struct tree_node *current_node,int index,int method,int
                     error = addNewNode(child,method);
                     if(error<0)
                         return -1;
-                    /*
-                    // Computing the heuristic value
-                    child->h=heuristic(child);
-                    if (method==best)
-                        child->f=child->h;
-                    else if (method==astar)
-                        child->f=child->g+child->h;
-                    else
-                        child->f=0.0;
-                    child->firstChild =NULL;
-                     int errorChilds = addToAllNodes(current_node);
-                    if(errorChilds<0)
-                        return -1;
-                    /* int errorChilds = addChild(current_node,child);
-                        if(errorChilds<0)
-                            return -1;
 
-                    int err=0;
-                    if (method==depth)
-                        err=add_frontier_front(child);
-                    else if (method==breadth)
-                        err=add_frontier_back(child);
-                    else if (method==best || method==astar)
-                        err=add_frontier_in_order(child);
-                    if (err<0)
-                        return -1;*/
                 }
             }
 
@@ -1301,14 +1161,16 @@ int findChilderForAStack(struct tree_node *current_node,int index,int method,int
     return 1;
 }
 
-int findChilderForAFreecell(struct tree_node *current_node,int index,int method)
+//Find all children for the cards of free cells
+int findChilderForAFreecell(struct treeNode *current_node,int index,int method)
 {
     int addToFoundation = allowAddCardToFoundation(current_node->Freecells[index],current_node->FoundatationRates);
 
+    //move card to Foundation
     if(addToFoundation)
     {
 		// Initializing the new child
-		struct tree_node *child=(struct tree_node*) malloc(sizeof(struct tree_node));
+		struct treeNode *child=(struct treeNode*) malloc(sizeof(struct treeNode));
 
 		if (child==NULL) return -1;
 
@@ -1332,14 +1194,14 @@ int findChilderForAFreecell(struct tree_node *current_node,int index,int method)
         }
 
         child->parent=current_node;
-		child->g=current_node->g+1.0;	 	// The depth of the new child
+		child->g=current_node->g+1;	 	// The depth of the new child
 
 
 		// add card to Foundation
 		child->FoundatationRates[child->Freecells[index].icon]= child->Freecells[index].rate;
 
         //save the moved cards
-		moveToFoundation(child,child->Freecells[index]);
+		SaveMoveFoundation(child,child->Freecells[index]);
 
 		//remove card from freecell
 		child->Freecells[index].icon = -1;
@@ -1357,33 +1219,10 @@ int findChilderForAFreecell(struct tree_node *current_node,int index,int method)
             error = addNewNode(child,method);
             if(error<0)
                 return -1;
-            /*
-			// Computing the heuristic value
-			child->h=heuristic(child);
-			if (method==best)
-				child->f=child->h;
-			else if (method==astar)
-				child->f=child->g+child->h;
-			else
-				child->f=0.0;
-            child->firstChild =NULL;
-             int errorChilds = addToAllNodes(current_node);
-            if(errorChilds<0)
-                return -1;
-           /* int errorChilds = addChild(current_node,child);
-            if(errorChilds<0)
-                return -1;
-            int err=0;
-            if (method==depth)
-				err=add_frontier_front(child);
-			else if (method==breadth)
-				err=add_frontier_back(child);
-			else if (method==best || method==astar)
-				err=add_frontier_in_order(child);
-			if (err<0)
-                return -1;*/
+
 		}
     }
+
     //check every other stack for this combo
     for(int i=0; i<numberOfStacks;i++)
     {
@@ -1396,7 +1235,7 @@ int findChilderForAFreecell(struct tree_node *current_node,int index,int method)
         if(addToStack)
         {
             // Initializing the new child
-            struct tree_node *child=(struct tree_node*) malloc(sizeof(struct tree_node));
+            struct treeNode *child=(struct treeNode*) malloc(sizeof(struct treeNode));
 
             if (child==NULL) return -1;
 
@@ -1419,7 +1258,7 @@ int findChilderForAFreecell(struct tree_node *current_node,int index,int method)
             }
             child->firstChild =NULL;
             child->parent=current_node;
-            child->g=current_node->g+1.0;	 	// The depth of the new child
+            child->g=current_node->g+1;	 	// The depth of the new child
 
             // add card to Tableau
             push(&child->Tableau[i],child->Freecells[index]);
@@ -1428,7 +1267,7 @@ int findChilderForAFreecell(struct tree_node *current_node,int index,int method)
             struct stack tempS;
             tempS.size=0;
             push(&tempS,child->Freecells[index]);
-            moveToAnotherStack(child,i,tempS);
+            SaveMoveAnotherStack(child,i,tempS);
 
             //Remove card from freecell
             child->Freecells[index].icon = -1;
@@ -1446,31 +1285,7 @@ int findChilderForAFreecell(struct tree_node *current_node,int index,int method)
                 error = addNewNode(child,method);
                 if(error<0)
                     return -1;
-                    /*
-                // Computing the heuristic value
-                child->h=heuristic(child);
-                if (method==best)
-                    child->f=child->h;
-                else if (method==astar)
-                    child->f=child->g+child->h;
-                else
-                    child->f=0.0;
-                child->firstChild=NULL;
-                int errorChilds = addToAllNodes(current_node);
-                if(errorChilds<0)
-                return -1;
-           /* int errorChilds = addChild(current_node,child);
-            if(errorChilds<0)
-                return -1;
-                int err=0;
-                if (method==depth)
-                    err=add_frontier_front(child);
-                else if (method==breadth)
-                    err=add_frontier_back(child);
-                else if (method==best || method==astar)
-                    err=add_frontier_in_order(child);
-                if (err<0)
-                    return -1;*/
+
             }
 
         }
@@ -1480,6 +1295,7 @@ int findChilderForAFreecell(struct tree_node *current_node,int index,int method)
 }
 
 //This Function return the highest number of cards you can move from this stack
+//Input:current stack , the highest combo allowed in this round
 int getNumberOfComboCardsInStack(struct stack s,int highestComboAllowed)
 {
     if(s.size==0)
@@ -1497,7 +1313,7 @@ int getNumberOfComboCardsInStack(struct stack s,int highestComboAllowed)
         if(getColor(CurrCard.icon)!= getColor(PreviousCard.icon) && CurrCard.rate==PreviousCard.rate-1)
         {
             count++;
-            PreviousCard = CurrCard;  //?????????
+            PreviousCard = CurrCard;
         }
         else
         {
@@ -1508,6 +1324,8 @@ int getNumberOfComboCardsInStack(struct stack s,int highestComboAllowed)
     return count;
 }
 
+//Get the color of the card
+//Input: card's icon
 //0--->RED
 //1--->BLACK
 int getColor(int icon)
@@ -1521,8 +1339,8 @@ int getColor(int icon)
 }
 
 
-//This function return the highest numbers of cards allowed to move in the current state of game
-//The highest combo is equal to the number of freecells + number of empty Tableau stacks + 1
+//This function return the highest numbers of cards allowed to move in the current round of game
+//The highest combo is equal to the number of free cells + number of empty Tableau stacks + 1
 int getHighestComboAllowed(struct stack Tableau[numberOfStacks],struct card Freecells[numberOfFreecells])
 {
     int count=1;
@@ -1544,7 +1362,7 @@ int getHighestComboAllowed(struct stack Tableau[numberOfStacks],struct card Free
 }
 
 
-// A card can added to its Foundation if its rate equals to Foundation last cards rate +1//
+// A card can added to its Foundation if its rate equals to Foundation last cards rate +1
 // 1-->Add card to Foundation
 //0 --> cannot add card to Foundation
 int allowAddCardToFoundation(struct card c ,int foundationRate[numberOfFoundations])
@@ -1576,6 +1394,8 @@ int allowAddCardToCurrentStack(struct stack currStack,struct stack stackToAdd,in
     return 0;
 }
 
+//Returns the first empty free cell position
+//return -1 if all free cells have card
 int availableFreecell(struct card c[numberOfFreecells])
 {
     for(int i=0; i<numberOfFreecells;i++)
@@ -1590,7 +1410,7 @@ int availableFreecell(struct card c[numberOfFreecells])
 
 //To win the game you must put all the cards to Foundations
 //1->you win!
-int gameWon(struct tree_node *current_node)
+int gameWon(struct treeNode *current_node)
 {
     for (int i=0;i<numberOfFoundations;i++)
     {
@@ -1605,14 +1425,12 @@ int gameWon(struct tree_node *current_node)
 }
 
 // Giving a (solution) leaf-node of the search tree, this function computes
-// the moves of the blank that have to be done, starting from the root puzzle,
-// in order to go to the leaf node's puzzle.
+// the moves of the blank that have to be done, starting from the root,
 // Inputs:
-//		struct tree_node *solution_node	: A leaf-node
+//		struct treeNode *solutionNode	: A leaf-node
 // Output:
-//		The sequence of blank's moves that have to be done, starting from the root puzzle,
-//		in order to receive the leaf-node's puzzle, is stored into the global variable solution.
-void extract_solution(struct tree_node *solution_node,char* filename)
+//		The sequence of  moves that have to be done, starting from the root.
+void ExtractSolution(struct treeNode *solution_node,char* filename)
 {
 
     FILE *fout;
@@ -1624,21 +1442,21 @@ void extract_solution(struct tree_node *solution_node,char* filename)
 		return;
 	}
 
-	struct tree_node *temp_node=solution_node;
-	solution_length=solution_node->g;
+	struct treeNode *temp_node=solution_node;
+	solutionLength=solution_node->g;
 
-	solution= (int*) malloc(solution_length*sizeof(int));
+	solution= (int*) malloc(solutionLength*sizeof(int));
 	temp_node=solution_node;
 	//while node != root
-	fprintf(fout,"Solution Length: %f \n",(int)solution_length);
+	fprintf(fout,"Solution Length: %d \n",solutionLength);
 
-    writeToFile(temp_node,fout,solution_length);
+    writeToFile(temp_node,fout,solutionLength);
 
 	fclose(fout);
 }
 
 //Write solution to file
-void writeToFile(struct tree_node *node,FILE *fout,int size)
+void writeToFile(struct treeNode *node,FILE *fout,int size)
 {
 
     char moves[size][50];
@@ -1666,10 +1484,10 @@ void writeToFile(struct tree_node *node,FILE *fout,int size)
 
             if(node->moveTo>=0 && node->moveTo<8)
             {
-                sprintf(moves[index],"move card %c%d to stack \n",icon,card.rate,node->moveTo);
+                sprintf(moves[index],"move card %c%d to stack %d\n",icon,card.rate,node->moveTo);
             }
             else if(node->moveTo==8)
-                sprintf(moves[index],"move card %c%d to Freecell\n",icon,card.rate);
+                sprintf(moves[index],"move card %c%d to Free cell\n",icon,card.rate);
             else if(node->moveTo==9)
                 sprintf(moves[index],"move card %c%d to Foundation\n",icon,card.rate);
             else
@@ -1709,92 +1527,16 @@ void writeToFile(struct tree_node *node,FILE *fout,int size)
 
 }
 
-int main(int argc, char** argv)
-{
-    struct stack allStacks[numberOfStacks]={
-        {.size = 0 },
-        {.size = 0 },
-        {.size = 0 },
-        {.size = 0 },
-        {.size = 0 },
-        {.size = 0 },
-        {.size = 0 },
-        {.size = 0 }
-    };
-    int method;
-	struct tree_node *solution_node;
 
-
-    if(argc!=4)
-    {
-        printf("Wrong number of arguments\n");
-        WrongInputMessage();
-        return -1;
-
-    }
-    method = get_method(argv[1]);
-
-	if (method<0)
-	{
-		printf("Wrong method. Use correct syntax:\n");
-		WrongInputMessage();
-		return -1;
-	}
-	int err;
-	err=ReadInputFromFile(argv[2], allStacks,numberOfStacks);
-	if (err<0)
-    {
-        printf("Cannot read the input file!\n");
-        printf("Press Any Key to exit...\n");
-        getch();
-        return -1;
-    }
-
-
-    err = verifyInput(allStacks);
-    if (err<0)
-    {
-        printf("Wrong format of the input file!\n");
-        printf("Press Any Key to exit...\n");
-        getch();
-        return -1;
-    }
-
-    printf("Solving %s using %s...\n",argv[2],argv[1]);
-	t1=clock();
-
-    initialize_search(allStacks,method);
-
-	solution_node=search(method);
-
-	t2=clock();
-
-	if (solution_node!=NULL)
-	{
-		printf("Solution found! (%d steps)\n",(int)solution_node->g);
-		printf("Time spent: %f secs\n",((float) t2-t1)/CLOCKS_PER_SEC);
-		extract_solution(solution_node,argv[3]);
-		//write_solution_to_file(argv[3], solution_length, solution);
-	}
-	else
-        printf("No solution found.\n");
-
-    printf("Press Any Key to exit...\n");
-    getch();
-    return 0;
-
-
-}
 //Display to console the current table of the game
-void displayGameTable(struct tree_node *c)
+void displayGameTable(struct treeNode *c)
 {
 
-  //  printf("%d\n",c->h);
 	int i,j;
     if(1==1)
     {
     printf("******************************************************************************\n\n");
-    printf("--------------------FREECELLS----------------------------------------------- f=%f h=%f g=%f\n",c->f,c->h,c->g);
+    printf("--------------------FREECELLS----------------------------------------------- f=%f h=%f g=%d\n",c->f,c->h,(int)c->g);
     for(i=0; i<numberOfFreecells;i++)
     {
         char s = 'E';
@@ -1857,15 +1599,78 @@ void displayGameTable(struct tree_node *c)
         printf("-------------------------------------------------------------------\n");
     }
 
-	/*for(i=0;i<numberOfFoundations;i++)
-	{
-	    if(c->h>=9)
-        {
-            printf("%d\n",c->h);
-            printf("-------------------------------------------------------------------");
-            printf("Foundation %d with last rate = %d \n",i,c->FoundatationRates[i]);
-            printf("\n");
-        }
-	}*/
 }
 
+int main(int argc, char** argv)
+{
+    struct stack allStacks[numberOfStacks]={
+        {.size = 0 },
+        {.size = 0 },
+        {.size = 0 },
+        {.size = 0 },
+        {.size = 0 },
+        {.size = 0 },
+        {.size = 0 },
+        {.size = 0 }
+    };
+    int method;
+	struct treeNode *solutionNode;
+
+
+    if(argc!=4)
+    {
+        printf("Wrong number of arguments\n");
+        WrongInputMessage();
+        return -1;
+
+    }
+    method = GetMethod(argv[1]);
+
+	if (method<0)
+	{
+		printf("Wrong method. Use correct syntax:\n");
+		WrongInputMessage();
+		return -1;
+	}
+	int err;
+	err=ReadInputFromFile(argv[2], allStacks,numberOfStacks);
+	if (err<0)
+    {
+        printf("Cannot read the input file!\n");
+        printf("Press Any Key to exit...\n");
+        getch();
+        return -1;
+    }
+
+
+    err = verifyInput(allStacks);
+    if (err<0)
+    {
+        printf("Wrong format of the input file!\n");
+        printf("Press Any Key to exit...\n");
+        getch();
+        return -1;
+    }
+
+    printf("Solving %s using %s...\n",argv[2],argv[1]);
+	t1=clock();
+
+    InitializeSearch(allStacks,method);
+
+	solutionNode=search(method);
+
+	t2=clock();
+
+	if (solutionNode!=NULL)
+	{
+		printf("Solution found! (%d steps)\n",(int)solutionNode->g);
+		printf("Time spent: %f secs\n",((float) t2-t1)/CLOCKS_PER_SEC);
+		ExtractSolution(solutionNode,argv[3]);
+	}
+	else
+        printf("No solution found.\n");
+
+    printf("Press Any Key to exit...\n");
+    getch();
+    return 0;
+}

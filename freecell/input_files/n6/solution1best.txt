@@ -1,0 +1,31 @@
+Solution Length: 30 
+move card S0 to Foundation
+move card S1 to Foundation
+move card S2 to Foundation
+move card S5 to Free cell
+move card H2 to Free cell
+move card D0 to Foundation
+move card D5 to Free cell
+move card D2 to Free cell
+move card D1 to Foundation
+move card D2 to Foundation
+move card C5 to Free cell
+move card D3 to Foundation
+move card D4 to Foundation
+move card D5 to Foundation
+move card C0 to Foundation
+move card C1 to Foundation
+move card S3 to Foundation
+move card S4 to Foundation
+move card S5 to Foundation
+move card C2 to Foundation
+move card C3 to Foundation
+move card H5 to Free cell
+move card C4 to Foundation
+move card C5 to Foundation
+move card H0 to Foundation
+move card H1 to Foundation
+move card H2 to Foundation
+move card H3 to Foundation
+move card H4 to Foundation
+move card H5 to Foundation

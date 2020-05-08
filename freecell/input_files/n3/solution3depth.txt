@@ -1,0 +1,64 @@
+Solution Length: 63 
+move card D0 to stack 6
+move card C2 to Free cell
+move card D0 to Foundation
+move card S1 to Free cell
+move card C2 to stack 5
+move card S1 to stack 4
+move card C0 to stack 0
+move card C2 to Free cell
+move card S1 to stack 3
+move card D2 to Free cell
+move card C2 to stack 4
+move card S1 to Free cell
+move card S1 to stack 5
+move card D2 to stack 6
+move card H2 to Free cell
+move card S1 to Free cell
+move card C2 to Free cell
+move card D2 to Free cell
+move card S1 to stack 3
+move card S2 to Free cell
+move card D2 to stack 4
+move card S2 to stack 5
+move card C2 to stack 6
+move card H2 to stack 7
+move card D2 to Free cell
+move card C2 to Free cell
+move card S1 to Free cell
+move card D2 to stack 3
+move card S1 to stack 7
+move card H0 to stack 7
+move card C2 to stack 2
+move card H0 to Foundation
+move card S1 to Free cell
+move card H2 to Free cell
+move card S1 to stack 3
+move card S2 to Free cell
+move card H2 to stack 4
+move card C2 to Free cell
+move card S2 to stack 2
+move card S0 to Foundation
+move card C2 to stack 5
+move card S1 to Foundation
+move card H2 to Free cell
+move card C2 to Free cell
+move card D2 to Free cell
+move card H2 to stack 3
+move card S2 to Foundation
+move card D2 to stack 2
+move card C1 to Free cell
+move card C2 to stack 1
+move card C1 to stack 3
+move card D2 to Free cell
+move card C0 to Foundation
+move card C1 to Foundation
+move card D2 to stack 2
+move card H2 to Free cell
+move card C2 to Foundation
+move card D2 to Free cell
+move card D1 to Foundation
+move card D2 to Foundation
+move card H2 to stack 1
+move card H1 to Foundation
+move card H2 to Foundation
